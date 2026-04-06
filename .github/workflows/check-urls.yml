@@ -1,0 +1,85 @@
+name: Shoprenter URL ellenorzes
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_file:
+        description: "Bemeneti fajl utvonala a repoban"
+        required: false
+        default: "input/termekek.xlsx"
+      url_column:
+        description: "Az URL-eket tartalmazo oszlop neve"
+        required: false
+        default: "URL"
+      min_delay:
+        description: "Minimum varakozas ket kerés között (masodperc)"
+        required: false
+        default: "1.5"
+      max_delay:
+        description: "Maximum varakozas ket kerés között (masodperc)"
+        required: false
+        default: "2.5"
+      timeout:
+        description: "Olvasasi timeout (mp)"
+        required: false
+        default: "12"
+      connect_timeout:
+        description: "Kapcsolodasi timeout (mp)"
+        required: false
+        default: "6"
+      save_every:
+        description: "Reszmentes ennyi soronkent"
+        required: false
+        default: "100"
+      use_head:
+        description: "HEAD + GET fallback hasznalata (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  check-urls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run URL checker
+        shell: bash
+        run: |
+          CMD=(python check_urls.py \
+            --input "${{ github.event.inputs.input_file || 'input/termekek.xlsx' }}" \
+            --url-column "${{ github.event.inputs.url_column || 'URL' }}" \
+            --min-delay "${{ github.event.inputs.min_delay || '1.5' }}" \
+            --max-delay "${{ github.event.inputs.max_delay || '2.5' }}" \
+            --timeout "${{ github.event.inputs.timeout || '12' }}" \
+            --connect-timeout "${{ github.event.inputs.connect_timeout || '6' }}" \
+            --save-every "${{ github.event.inputs.save_every || '100' }}")
+
+          if [ "${{ github.event.inputs.use_head || 'true' }}" = "false" ]; then
+            CMD+=(--no-head)
+          fi
+
+          printf 'Futtatando parancs: '
+          printf '%q ' "${CMD[@]}"
+          printf '\n'
+          "${CMD[@]}"
+
+      - name: Upload output artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoprenter-url-check-results
+          path: output/*
+          if-no-files-found: error
+          retention-days: 14
