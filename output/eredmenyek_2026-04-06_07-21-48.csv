@@ -1,0 +1,3 @@
+﻿URL,Ellenorzott_URL,Status_Code,Vegso_URL,Eredmeny,Hiba,Mod
+https://example.com,https://example.com,,,hiba,"ConnectionError: HTTPSConnectionPool(host='example.com', port=443): Max retries exceeded with url: / (Caused by NameResolutionError(""HTTPSConnection(host='example.com', port=443): Failed to resolve 'example.com' ([Errno -3] Temporary failure in name resolution)""))",
+https://example.com/does-not-exist-xyz,https://example.com/does-not-exist-xyz,,,hiba,"ConnectionError: HTTPSConnectionPool(host='example.com', port=443): Max retries exceeded with url: /does-not-exist-xyz (Caused by NameResolutionError(""HTTPSConnection(host='example.com', port=443): Failed to resolve 'example.com' ([Errno -3] Temporary failure in name resolution)""))",
