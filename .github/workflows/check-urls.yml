@@ -12,11 +12,11 @@ on:
         required: false
         default: "URL"
       min_delay:
-        description: "Minimum varakozas ket kerés között (masodperc)"
+        description: "Minimum varakozas ket keres között (masodperc)"
         required: false
         default: "1.5"
       max_delay:
-        description: "Maximum varakozas ket kerés között (masodperc)"
+        description: "Maximum varakozas ket keres között (masodperc)"
         required: false
         default: "2.5"
       timeout:
@@ -55,6 +55,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Clean output folder
+        run: |
+          rm -rf output
+          mkdir -p output
+
+      - name: Show input folder
+        run: |
+          echo "Input mappa tartalma:"
+          ls -lah input || true
+
       - name: Run URL checker
         shell: bash
         run: |
@@ -75,6 +85,11 @@ jobs:
           printf '%q ' "${CMD[@]}"
           printf '\n'
           "${CMD[@]}"
+
+      - name: Show output folder
+        run: |
+          echo "Output mappa tartalma:"
+          ls -lah output || true
 
       - name: Upload output artifact
         uses: actions/upload-artifact@v4
