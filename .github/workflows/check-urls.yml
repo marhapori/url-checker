@@ -5,35 +5,35 @@ on:
     inputs:
       input_file:
         description: "Bemeneti fajl utvonala a repoban"
-        required: false
+        required: true
         default: "input/termekek.xlsx"
       url_column:
         description: "Az URL-eket tartalmazo oszlop neve"
-        required: false
+        required: true
         default: "URL"
       min_delay:
-        description: "Minimum varakozas ket keres között (masodperc)"
-        required: false
+        description: "Minimum varakozas ket keres kozott (masodperc)"
+        required: true
         default: "1.5"
       max_delay:
-        description: "Maximum varakozas ket keres között (masodperc)"
-        required: false
+        description: "Maximum varakozas ket keres kozott (masodperc)"
+        required: true
         default: "2.5"
       timeout:
         description: "Olvasasi timeout (mp)"
-        required: false
+        required: true
         default: "12"
       connect_timeout:
         description: "Kapcsolodasi timeout (mp)"
-        required: false
+        required: true
         default: "6"
       save_every:
         description: "Reszmentes ennyi soronkent"
-        required: false
+        required: true
         default: "100"
       use_head:
         description: "HEAD + GET fallback hasznalata (true/false)"
-        required: false
+        required: true
         default: "true"
 
 jobs:
@@ -72,61 +72,48 @@ jobs:
           echo "Input mappa tartalma:"
           ls -lah input || true
 
-      - name: Preview selected input file
-        shell: bash
+      - name: Show selected input file info
+        env:
+          INPUT_FILE: ${{ github.event.inputs.input_file }}
         run: |
-          python - <<'PY'
-from pathlib import Path
-import pandas as pd
-
-input_file = "${{ github.event.inputs.input_file || 'input/termekek.xlsx' }}"
-url_column = "${{ github.event.inputs.url_column || 'URL' }}"
-p = Path(input_file)
-
-print(f"Hasznalt input fajl: {p}")
-print(f"Letezik: {p.exists()}")
-
-if not p.exists():
-    raise SystemExit("A bemeneti fajl nem talalhato.")
-
-print(f"Fajlmeret byte-ban: {p.stat().st_size}")
-
-if p.suffix.lower() in [".xlsx", ".xls"]:
-    df = pd.read_excel(p)
-elif p.suffix.lower() == ".csv":
-    df = pd.read_csv(p)
-else:
-    raise SystemExit(f"Nem tamogatott fajltipus: {p.suffix}")
-
-print(f"Oszlopok: {list(df.columns)}")
-print(f"Sorok szama: {len(df)}")
-
-if url_column not in df.columns:
-    raise SystemExit(f"Nincs ilyen URL oszlop: {url_column}")
-
-sample = df[url_column].astype(str).head(10).tolist()
-print("Elso 10 URL:")
-for i, u in enumerate(sample, start=1):
-    print(f"{i}. {u}")
-PY
+          echo "Hasznalt input fajl: $INPUT_FILE"
+          if [ -f "$INPUT_FILE" ]; then
+            echo "Fajl adatai:"
+            ls -lah "$INPUT_FILE"
+            echo "SHA256:"
+            sha256sum "$INPUT_FILE"
+          else
+            echo "NINCS ilyen fajl: $INPUT_FILE"
+            exit 1
+          fi
 
       - name: Run URL checker
         shell: bash
+        env:
+          INPUT_FILE: ${{ github.event.inputs.input_file }}
+          URL_COLUMN: ${{ github.event.inputs.url_column }}
+          MIN_DELAY: ${{ github.event.inputs.min_delay }}
+          MAX_DELAY: ${{ github.event.inputs.max_delay }}
+          TIMEOUT: ${{ github.event.inputs.timeout }}
+          CONNECT_TIMEOUT: ${{ github.event.inputs.connect_timeout }}
+          SAVE_EVERY: ${{ github.event.inputs.save_every }}
+          USE_HEAD: ${{ github.event.inputs.use_head }}
         run: |
-          CMD=(python check_urls.py \
-            --input "${{ github.event.inputs.input_file || 'input/termekek.xlsx' }}" \
-            --url-column "${{ github.event.inputs.url_column || 'URL' }}" \
-            --min-delay "${{ github.event.inputs.min_delay || '1.5' }}" \
-            --max-delay "${{ github.event.inputs.max_delay || '2.5' }}" \
-            --timeout "${{ github.event.inputs.timeout || '12' }}" \
-            --connect-timeout "${{ github.event.inputs.connect_timeout || '6' }}" \
-            --save-every "${{ github.event.inputs.save_every || '100' }}")
+          CMD=(python check_urls.py
+            --input "$INPUT_FILE"
+            --url-column "$URL_COLUMN"
+            --min-delay "$MIN_DELAY"
+            --max-delay "$MAX_DELAY"
+            --timeout "$TIMEOUT"
+            --connect-timeout "$CONNECT_TIMEOUT"
+            --save-every "$SAVE_EVERY"
+          )
 
-          if [ "${{ github.event.inputs.use_head || 'true' }}" = "false" ]; then
+          if [ "$USE_HEAD" = "false" ]; then
             CMD+=(--no-head)
           fi
 
-          printf 'Futtatando parancs: '
+          echo "Futtatando parancs:"
           printf '%q ' "${CMD[@]}"
           printf '\n'
           "${CMD[@]}"
