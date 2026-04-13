@@ -45,6 +45,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show git info
+        run: |
+          echo "Ref: $GITHUB_REF"
+          echo "Ref name: $GITHUB_REF_NAME"
+          echo "SHA: $GITHUB_SHA"
+          git log --oneline -n 3
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -64,6 +71,44 @@ jobs:
         run: |
           echo "Input mappa tartalma:"
           ls -lah input || true
+
+      - name: Preview selected input file
+        shell: bash
+        run: |
+          python - <<'PY'
+from pathlib import Path
+import pandas as pd
+
+input_file = "${{ github.event.inputs.input_file || 'input/termekek.xlsx' }}"
+url_column = "${{ github.event.inputs.url_column || 'URL' }}"
+p = Path(input_file)
+
+print(f"Hasznalt input fajl: {p}")
+print(f"Letezik: {p.exists()}")
+
+if not p.exists():
+    raise SystemExit("A bemeneti fajl nem talalhato.")
+
+print(f"Fajlmeret byte-ban: {p.stat().st_size}")
+
+if p.suffix.lower() in [".xlsx", ".xls"]:
+    df = pd.read_excel(p)
+elif p.suffix.lower() == ".csv":
+    df = pd.read_csv(p)
+else:
+    raise SystemExit(f"Nem tamogatott fajltipus: {p.suffix}")
+
+print(f"Oszlopok: {list(df.columns)}")
+print(f"Sorok szama: {len(df)}")
+
+if url_column not in df.columns:
+    raise SystemExit(f"Nincs ilyen URL oszlop: {url_column}")
+
+sample = df[url_column].astype(str).head(10).tolist()
+print("Elso 10 URL:")
+for i, u in enumerate(sample, start=1):
+    print(f"{i}. {u}")
+PY
 
       - name: Run URL checker
         shell: bash
