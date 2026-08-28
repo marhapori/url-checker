@@ -6,11 +6,12 @@ Ez a csomag arra való, hogy nagyobb URL-listát kulturált tempóban ellenőriz
 - van-e átirányítás,
 - van-e átmeneti hiba vagy rate limit.
 
-A script kifejezetten óvatos futásra van hangolva:
+A script kifejezetten óvatos és kiszámítható futásra van hangolva:
 - egy szálon fut,
 - random várakozást használ,
-- retry-t használ 429 / 5xx hibákra,
-- először `HEAD`-et próbál, és szükség esetén `GET`-re vált.
+- alapból egyetlen, streamelt `GET` kérést küld URL-enként,
+- nem indít automatikus retry-láncot 429 / 5xx hibákra,
+- időkorlátnál részleges eredményt ment.
 
 ## A csomag tartalma
 
@@ -47,6 +48,7 @@ Ha más a fájlnév vagy az oszlopnév, a workflow indításakor meg tudod adni.
    - `timeout`
    - `connect_timeout`
    - `save_every`
+   - `max_runtime_minutes`
    - `use_head`
 8. A futás végén az **Artifacts** részből letölthető az eredmény.
 
@@ -55,10 +57,22 @@ Ha más a fájlnév vagy az oszlopnév, a workflow indításakor meg tudod adni.
 Óvatos induló beállítás:
 - `min_delay`: `1.5`
 - `max_delay`: `2.5`
+- `timeout`: `8`
+- `connect_timeout`: `4`
+- `save_every`: `25`
+- `max_runtime_minutes`: `320`
+- `use_head`: `false`
+
+A `HEAD` mód csak különleges esetben ajánlott. Bekapcsolása:
 - `use_head`: `true`
 
-Ha a HEAD kérés gyanúsan sok hamis hibát ad:
-- `use_head`: `false`
+A `429` és `5xx` válaszok bekerülnek az eredménybe, de a script nem várja ki a
+szerver esetleg nagyon hosszú `Retry-After` értékét. Ezeket az URL-eket később
+egy külön, kisebb listában érdemes újra ellenőrizni.
+
+Ha a futás eléri a `max_runtime_minutes` értéket, a script menti az addigi
+eredményt és nem nulla kilépési kóddal leáll. A workflow az artifactot ilyen
+esetben is feltölti.
 
 ## Kimeneti oszlopok
 
