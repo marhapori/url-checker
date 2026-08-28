@@ -22,24 +22,28 @@ on:
       timeout:
         description: "Olvasasi timeout (mp)"
         required: true
-        default: "12"
+        default: "8"
       connect_timeout:
         description: "Kapcsolodasi timeout (mp)"
         required: true
-        default: "6"
+        default: "4"
       save_every:
         description: "Reszmentes ennyi soronkent"
         required: true
-        default: "100"
+        default: "25"
+      max_runtime_minutes:
+        description: "Kontrollalt leallas ennyi perc utan"
+        required: true
+        default: "320"
       use_head:
         description: "HEAD + GET fallback hasznalata (true/false)"
         required: true
-        default: "true"
+        default: "false"
 
 jobs:
   check-urls:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
       - name: Checkout
@@ -88,6 +92,7 @@ jobs:
           fi
 
       - name: Run URL checker
+        timeout-minutes: 330
         shell: bash
         env:
           INPUT_FILE: ${{ github.event.inputs.input_file }}
@@ -97,6 +102,7 @@ jobs:
           TIMEOUT: ${{ github.event.inputs.timeout }}
           CONNECT_TIMEOUT: ${{ github.event.inputs.connect_timeout }}
           SAVE_EVERY: ${{ github.event.inputs.save_every }}
+          MAX_RUNTIME_MINUTES: ${{ github.event.inputs.max_runtime_minutes }}
           USE_HEAD: ${{ github.event.inputs.use_head }}
         run: |
           CMD=(python check_urls.py
@@ -107,10 +113,11 @@ jobs:
             --timeout "$TIMEOUT"
             --connect-timeout "$CONNECT_TIMEOUT"
             --save-every "$SAVE_EVERY"
+            --max-runtime-minutes "$MAX_RUNTIME_MINUTES"
           )
 
-          if [ "$USE_HEAD" = "false" ]; then
-            CMD+=(--no-head)
+          if [ "$USE_HEAD" = "true" ]; then
+            CMD+=(--use-head)
           fi
 
           echo "Futtatando parancs:"
@@ -119,14 +126,16 @@ jobs:
           "${CMD[@]}"
 
       - name: Show output folder
+        if: always()
         run: |
           echo "Output mappa tartalma:"
           ls -lah output || true
 
       - name: Upload output artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: shoprenter-url-check-results
           path: output/*
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
