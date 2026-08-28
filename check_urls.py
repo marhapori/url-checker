@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import signal
 import sys
 import time
 from datetime import datetime
@@ -10,17 +11,16 @@ from typing import Tuple
 
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 DEFAULT_INPUT = "input/termekek.xlsx"
 DEFAULT_OUTPUT_DIR = "output"
 DEFAULT_URL_COLUMN = "URL"
-DEFAULT_TIMEOUT = 12
-DEFAULT_CONNECT_TIMEOUT = 6
+DEFAULT_TIMEOUT = 8
+DEFAULT_CONNECT_TIMEOUT = 4
 DEFAULT_MIN_DELAY = 1.5
 DEFAULT_MAX_DELAY = 2.5
-DEFAULT_SAVE_EVERY = 100
+DEFAULT_SAVE_EVERY = 25
+DEFAULT_MAX_RUNTIME_MINUTES = 320
 
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -41,27 +41,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Olvasási timeout másodpercben")
     parser.add_argument("--connect-timeout", type=int, default=DEFAULT_CONNECT_TIMEOUT, help="Kapcsolódási timeout másodpercben")
     parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="Részmentés ennyi soronként")
-    parser.add_argument("--no-head", action="store_true", help="HEAD kérés kihagyása, közvetlen GET stream=True")
+    parser.add_argument(
+        "--max-runtime-minutes",
+        type=int,
+        default=DEFAULT_MAX_RUNTIME_MINUTES,
+        help="Kontrollált leállás ennyi perc után; 0 esetén nincs korlát",
+    )
+    parser.add_argument(
+        "--use-head",
+        action="store_true",
+        help="Először HEAD kérés használata; alapból közvetlen GET fut",
+    )
+    # Visszafelé kompatibilis, rejtett kapcsoló a korábbi futtatóparancsokhoz.
+    parser.add_argument("--no-head", action="store_false", dest="use_head", help=argparse.SUPPRESS)
     return parser
 
 
 def make_session() -> requests.Session:
     session = requests.Session()
-
-    retry = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        backoff_factor=1.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=frozenset(["HEAD", "GET"]),
-        raise_on_status=False,
-        respect_retry_after_header=True,
-    )
-
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=1, pool_maxsize=1)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
     session.headers.update({"User-Agent": BROWSER_UA})
     return session
 
@@ -101,7 +98,6 @@ def perform_request(
 
     try:
         method_used = "GET"
-        response = None
 
         if use_head:
             method_used = "HEAD"
@@ -109,17 +105,16 @@ def perform_request(
 
             if needs_get_fallback(response.status_code):
                 response.close()
-                method_used = "GET"
+                method_used = "HEAD->GET"
                 response = session.get(url, timeout=timeout, allow_redirects=True, stream=True)
         else:
             response = session.get(url, timeout=timeout, allow_redirects=True, stream=True)
 
         status_code = str(response.status_code)
         final_url = response.url or ""
-        history_count = str(len(response.history))
-        result = classify_status_code(response.status_code)
+        result = "átirányítás" if response.history else classify_status_code(response.status_code)
         response.close()
-        return status_code, final_url, result, "", method_used + f"->{response.request.method}"
+        return status_code, final_url, result, "", method_used
 
     except requests.RequestException as exc:
         error_text = f"{type(exc).__name__}: {exc}"
@@ -157,6 +152,14 @@ def main() -> int:
 
     if args.min_delay > args.max_delay:
         print("A min-delay nem lehet nagyobb, mint a max-delay.", file=sys.stderr)
+        return 2
+
+    if args.timeout <= 0 or args.connect_timeout <= 0:
+        print("A timeout értékeknek pozitív számnak kell lenniük.", file=sys.stderr)
+        return 2
+
+    if args.max_runtime_minutes < 0:
+        print("A max-runtime-minutes nem lehet negatív.", file=sys.stderr)
         return 2
 
     input_path = Path(args.input)
@@ -197,16 +200,40 @@ def main() -> int:
         return 0
 
     session = make_session()
+    started_at = time.monotonic()
+    stop_requested = False
+
+    def request_stop(signum: int, _frame: object) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+        print(f"Leállítási jel érkezett ({signum}); részleges eredmény mentése következik.")
+
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, request_stop)
     print(f"Ellenőrzés indul: {total} URL")
     print(f"Bemenet: {input_path}")
     print(f"Kimenet: {output_xlsx}")
 
+    completed = 0
+    stopped_early = False
+
     try:
         for idx, url in enumerate(work_df["Ellenorzott_URL"], start=1):
+            runtime_limit_reached = (
+                args.max_runtime_minutes > 0
+                and time.monotonic() - started_at >= args.max_runtime_minutes * 60
+            )
+            if stop_requested or runtime_limit_reached:
+                stopped_early = True
+                reason = "leállítási kérés" if stop_requested else "futási időkorlát"
+                print(f"Kontrollált leállás: {reason}; {completed}/{total} sor készült el.")
+                break
+
             if not url:
                 work_df.at[idx - 1, "Eredmeny"] = "üres URL"
                 work_df.at[idx - 1, "Hiba"] = "Az URL mező üres"
                 print(f"[{idx}/{total}] üres URL")
+                completed = idx
                 continue
 
             status_code, final_url, result, error_text, method_used = perform_request(
@@ -214,7 +241,7 @@ def main() -> int:
                 url=url,
                 connect_timeout=args.connect_timeout,
                 read_timeout=args.timeout,
-                use_head=not args.no_head,
+                use_head=args.use_head,
             )
 
             work_df.at[idx - 1, "Status_Code"] = status_code
@@ -224,6 +251,7 @@ def main() -> int:
             work_df.at[idx - 1, "Mod"] = method_used
 
             print(f"[{idx}/{total}] {url} -> {status_code or 'hiba'} | {result}")
+            completed = idx
 
             if args.save_every > 0 and idx % args.save_every == 0:
                 save_results(work_df, output_xlsx, output_csv)
@@ -233,13 +261,17 @@ def main() -> int:
                 time.sleep(random.uniform(args.min_delay, args.max_delay))
 
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
         session.close()
 
     save_results(work_df, output_xlsx, output_csv)
-    print("Kész.")
+    if stopped_early:
+        print(f"Részleges eredmény elkészült: {completed}/{total} sor feldolgozva.")
+    else:
+        print("Kész.")
     print(f"Excel eredményfájl: {output_xlsx}")
     print(f"CSV eredményfájl: {output_csv}")
-    return 0
+    return 3 if stopped_early else 0
 
 
 if __name__ == "__main__":
